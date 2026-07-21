@@ -1,0 +1,46 @@
+version: "3.9"
+
+# Infraestructura local de UYanapay
+# - db: PostgreSQL principal (escritura)
+# - db-replica: read replica física (streaming replication) para lecturas de alto volumen
+services:
+  db:
+    image: postgres:16
+    container_name: uyanapay-db
+    environment:
+      POSTGRES_USER: uyanapay
+      POSTGRES_PASSWORD: uyanapay
+      POSTGRES_DB: uyanapay
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=5
+      -c hot_standby=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uyanapay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Réplica de lectura (opcional en desarrollo; en producción se configura
+  # con pg_basebackup + primary_conninfo hacia el master).
+  db-replica:
+    image: postgres:16
+    container_name: uyanapay-db-replica
+    profiles: ["replica"]
+    environment:
+      POSTGRES_USER: uyanapay
+      POSTGRES_PASSWORD: uyanapay
+      POSTGRES_DB: uyanapay
+    ports:
+      - "5433:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

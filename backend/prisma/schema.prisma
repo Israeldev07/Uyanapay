@@ -1,0 +1,355 @@
+// UYanapay - Esquema de base de datos (PostgreSQL, 3FN)
+// Migraciones gestionadas con Prisma Migrate.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Enumeraciones ============
+
+enum Role {
+  CLIENTE
+  YANAPAYER
+  ADMIN
+}
+
+enum FavorStatus {
+  PUBLICADO
+  ACEPTADO
+  EN_CAMINO
+  ENTREGADO
+  FINALIZADO
+  CANCELADO
+}
+
+enum Urgencia {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum MetodoPago {
+  SALDO
+  EFECTIVO
+  TRANSFERENCIA
+}
+
+enum TipoTransaccion {
+  RECARGA
+  PAGO_FAVOR
+  GANANCIA
+  RETIRO
+  PROPINA
+  COMISION
+  REEMBOLSO
+}
+
+enum EstadoTransaccion {
+  PENDIENTE
+  COMPLETADA
+  RECHAZADA
+}
+
+enum Transporte {
+  MOTO
+  BICICLETA
+  CAMINANDO
+}
+
+enum EstadoVerificacion {
+  PENDIENTE
+  APROBADO
+  RECHAZADO
+}
+
+enum TipoMensaje {
+  TEXTO
+  IMAGEN
+  DOCUMENTO
+  UBICACION
+  AUDIO
+}
+
+enum EstadoIncidente {
+  ABIERTO
+  EN_REVISION
+  RESUELTO
+}
+
+// ============ Núcleo de usuarios ============
+
+model University {
+  id      String  @id @default(cuid())
+  name    String  @unique
+  campus  String?
+  domain  String? // dominio de correo institucional para validación
+  users   User[]
+
+  @@map("universities")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String
+  role         Role     @default(CLIENTE)
+  career       String?
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  acceptedTos  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  universityId String
+  university   University @relation(fields: [universityId], references: [id])
+
+  yanapayerProfile YanapayerProfile?
+  wallet           Wallet?
+  favorsAsClient   FavorRequest[]    @relation("ClientFavors")
+  favorsAsWorker   FavorRequest[]    @relation("WorkerFavors")
+  messagesSent     Message[]
+  ratingsGiven     Rating[]          @relation("RatingsGiven")
+  ratingsReceived  Rating[]          @relation("RatingsReceived")
+  incidents        Incident[]
+  notifications    Notification[]
+
+  @@index([universityId])
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model YanapayerProfile {
+  id             String             @id @default(cuid())
+  userId         String             @unique
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cedula         String             @unique
+  carnetUrl      String? // foto del carnet universitario
+  photoUrl       String? // foto de verificación facial
+  semester       Int?
+  bankAccount    String?
+  transport      Transporte         @default(CAMINANDO)
+  schedule       Json? // disponibilidad horaria semanal
+  verification   EstadoVerificacion @default(PENDIENTE)
+  level          Int                @default(1)
+  ratingAvg      Decimal            @default(0) @db.Decimal(3, 2)
+  ratingCount    Int                @default(0)
+  completedCount Int                @default(0)
+  isAvailable    Boolean            @default(false)
+  currentLat     Decimal?           @db.Decimal(9, 6)
+  currentLng     Decimal?           @db.Decimal(9, 6)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([isAvailable, verification])
+  @@map("yanapayer_profiles")
+}
+
+// ============ Catálogo de servicios ============
+
+model Category {
+  id          String         @id @default(cuid())
+  slug        String         @unique
+  name        String
+  icon        String // clave del icono en el frontend
+  description String
+  basePrice   Decimal        @db.Decimal(10, 2)
+  avgMinutes  Int
+  isActive    Boolean        @default(true)
+  favors      FavorRequest[]
+
+  @@map("categories")
+}
+
+// ============ Favores (núcleo del negocio) ============
+
+model FavorRequest {
+  id            String      @id @default(cuid())
+  code          String      @unique // código corto visible: UY-000123
+  clientId      String
+  client        User        @relation("ClientFavors", fields: [clientId], references: [id])
+  yanapayerId   String?
+  yanapayer     User?       @relation("WorkerFavors", fields: [yanapayerId], references: [id])
+  categoryId    String
+  category      Category    @relation(fields: [categoryId], references: [id])
+  title         String
+  description   String
+  photoUrls     String[]
+  originLabel   String
+  originLat     Decimal?    @db.Decimal(9, 6)
+  originLng     Decimal?    @db.Decimal(9, 6)
+  destLabel     String
+  destLat       Decimal?    @db.Decimal(9, 6)
+  destLng       Decimal?    @db.Decimal(9, 6)
+  scheduledAt   DateTime?
+  urgency       Urgencia    @default(MEDIA)
+  budget        Decimal     @db.Decimal(10, 2)
+  paymentMethod MetodoPago  @default(SALDO)
+  notes         String?
+  status        FavorStatus @default(PUBLICADO)
+  commission    Decimal     @default(0) @db.Decimal(10, 2)
+  total         Decimal     @default(0) @db.Decimal(10, 2)
+  couponId      String?
+  coupon        Coupon?     @relation(fields: [couponId], references: [id])
+
+  acceptedAt   DateTime?
+  startedAt    DateTime?
+  deliveredAt  DateTime?
+  completedAt  DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tracking     TrackingPoint[]
+  conversation Conversation?
+  ratings      Rating[]
+  transactions Transaction[]
+  incidents    Incident[]
+
+  @@index([status, createdAt])
+  @@index([clientId, status])
+  @@index([yanapayerId, status])
+  @@map("favor_requests")
+}
+
+// Puntos GPS para el seguimiento en tiempo real
+model TrackingPoint {
+  id        String       @id @default(cuid())
+  favorId   String
+  favor     FavorRequest @relation(fields: [favorId], references: [id], onDelete: Cascade)
+  lat       Decimal      @db.Decimal(9, 6)
+  lng       Decimal      @db.Decimal(9, 6)
+  createdAt DateTime     @default(now())
+
+  @@index([favorId, createdAt])
+  @@map("tracking_points")
+}
+
+// ============ Chat ============
+
+model Conversation {
+  id        String       @id @default(cuid())
+  favorId   String       @unique
+  favor     FavorRequest @relation(fields: [favorId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  type           TipoMensaje  @default(TEXTO)
+  content        String // texto o URL del recurso (imagen/documento/audio) o "lat,lng"
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// ============ Billetera y pagos ============
+
+model Wallet {
+  id             String        @id @default(cuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance        Decimal       @default(0) @db.Decimal(10, 2)
+  pendingBalance Decimal       @default(0) @db.Decimal(10, 2)
+  updatedAt      DateTime      @updatedAt
+  transactions   Transaction[]
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id        String            @id @default(cuid())
+  walletId  String
+  wallet    Wallet            @relation(fields: [walletId], references: [id])
+  favorId   String?
+  favor     FavorRequest?     @relation(fields: [favorId], references: [id])
+  type      TipoTransaccion
+  status    EstadoTransaccion @default(COMPLETADA)
+  amount    Decimal           @db.Decimal(10, 2) // positivo = entra, negativo = sale
+  reference String?
+  createdAt DateTime          @default(now())
+
+  @@index([walletId, createdAt])
+  @@map("transactions")
+}
+
+// ============ Reputación ============
+
+model Rating {
+  id        String       @id @default(cuid())
+  favorId   String
+  favor     FavorRequest @relation(fields: [favorId], references: [id])
+  raterId   String
+  rater     User         @relation("RatingsGiven", fields: [raterId], references: [id])
+  ratedId   String
+  rated     User         @relation("RatingsReceived", fields: [ratedId], references: [id])
+  stars     Int // 1..5
+  comment   String?
+  tip       Decimal?     @db.Decimal(10, 2)
+  createdAt DateTime     @default(now())
+
+  @@unique([favorId, raterId])
+  @@index([ratedId])
+  @@map("ratings")
+}
+
+// ============ Administración ============
+
+model Coupon {
+  id          String         @id @default(cuid())
+  code        String         @unique
+  discountPct Int // porcentaje de descuento 1..100
+  maxUses     Int            @default(1)
+  usedCount   Int            @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean        @default(true)
+  favors      FavorRequest[]
+
+  @@map("coupons")
+}
+
+model Incident {
+  id          String          @id @default(cuid())
+  favorId     String
+  favor       FavorRequest    @relation(fields: [favorId], references: [id])
+  reporterId  String
+  reporter    User            @relation(fields: [reporterId], references: [id])
+  description String
+  status      EstadoIncidente @default(ABIERTO)
+  resolution  String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([status])
+  @@map("incidents")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
