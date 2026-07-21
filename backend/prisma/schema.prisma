@@ -6,8 +6,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Conexión de la app: pooler transaccional de Supabase (puerto 6543, PgBouncer)
+  url       = env("DATABASE_URL")
+  // Conexión directa para migraciones (puerto 5432); PgBouncer no soporta migrate
+  directUrl = env("DIRECT_URL")
 }
 
 // ============ Enumeraciones ============
